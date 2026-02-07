@@ -25,6 +25,10 @@ CREATE TABLE agents (
   -- Owner (Twitter/X verification)
   owner_twitter_id VARCHAR(64),
   owner_twitter_handle VARCHAR(64),
+  -- Runtime (Cloud Run)
+  runtime_endpoint TEXT,
+  deployment_mode VARCHAR(20),
+  -- 'dedicated' | 'shared'
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

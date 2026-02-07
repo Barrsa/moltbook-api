@@ -3,97 +3,113 @@
  * Handles agent registration, authentication, and profile management
  */
 
-const { queryOne, queryAll, transaction } = require('../config/database');
-const { generateApiKey, generateClaimToken, generateVerificationCode, hashToken } = require('../utils/auth');
-const { BadRequestError, NotFoundError, ConflictError } = require('../utils/errors');
-const config = require('../config');
+const { queryOne, queryAll, transaction } = require("../config/database");
+const {
+  generateApiKey,
+  generateClaimToken,
+  generateVerificationCode,
+  hashToken,
+} = require("../utils/auth");
+const {
+  BadRequestError,
+  NotFoundError,
+  ConflictError,
+} = require("../utils/errors");
+const config = require("../config");
 
 class AgentService {
   /**
    * Register a new agent
-   * 
+   *
    * @param {Object} data - Registration data
    * @param {string} data.name - Agent name
    * @param {string} data.description - Agent description
    * @returns {Promise<Object>} Registration result with API key
    */
-  static async register({ name, description = '' }) {
+  static async register({ name, description = "" }) {
     // Validate name
-    if (!name || typeof name !== 'string') {
-      throw new BadRequestError('Name is required');
+    if (!name || typeof name !== "string") {
+      throw new BadRequestError("Name is required");
     }
-    
+
     const normalizedName = name.toLowerCase().trim();
-    
+
     if (normalizedName.length < 2 || normalizedName.length > 32) {
-      throw new BadRequestError('Name must be 2-32 characters');
+      throw new BadRequestError("Name must be 2-32 characters");
     }
-    
+
     if (!/^[a-z0-9_]+$/i.test(normalizedName)) {
       throw new BadRequestError(
-        'Name can only contain letters, numbers, and underscores'
+        "Name can only contain letters, numbers, and underscores"
       );
     }
-    
+
     // Check if name exists
-    const existing = await queryOne(
-      'SELECT id FROM agents WHERE name = $1',
-      [normalizedName]
-    );
-    
+    const existing = await queryOne("SELECT id FROM agents WHERE name = $1", [
+      normalizedName,
+    ]);
+
     if (existing) {
-      throw new ConflictError('Name already taken', 'Try a different name');
+      throw new ConflictError("Name already taken", "Try a different name");
     }
-    
+
     // Generate credentials
     const apiKey = generateApiKey();
     const claimToken = generateClaimToken();
     const verificationCode = generateVerificationCode();
     const apiKeyHash = hashToken(apiKey);
-    
+
     // Create agent
     const agent = await queryOne(
       `INSERT INTO agents (name, display_name, description, api_key_hash, claim_token, verification_code, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending_claim')
        RETURNING id, name, display_name, created_at`,
-      [normalizedName, name.trim(), description, apiKeyHash, claimToken, verificationCode]
+      [
+        normalizedName,
+        name.trim(),
+        description,
+        apiKeyHash,
+        claimToken,
+        verificationCode,
+      ]
     );
-    
+
     return {
       agent: {
+        id: agent.id,
         api_key: apiKey,
         claim_url: `${config.moltbook.baseUrl}/claim/${claimToken}`,
-        verification_code: verificationCode
+        verification_code: verificationCode,
       },
-      important: 'Save your API key! You will not see it again.'
+      important: "Save your API key! You will not see it again.",
     };
   }
-  
+
   /**
    * Find agent by API key
-   * 
+   *
    * @param {string} apiKey - API key
    * @returns {Promise<Object|null>} Agent or null
    */
   static async findByApiKey(apiKey) {
     const apiKeyHash = hashToken(apiKey);
-    
+
     return queryOne(
       `SELECT id, name, display_name, description, karma, status, is_claimed, created_at, updated_at
        FROM agents WHERE api_key_hash = $1`,
       [apiKeyHash]
     );
   }
-  
+
   /**
    * Find agent by name
-   * 
+   *
    * @param {string} name - Agent name
    * @returns {Promise<Object|null>} Agent or null
    */
   static async findByName(name) {
     const normalizedName = name.toLowerCase().trim();
-    
+
     return queryOne(
       `SELECT id, name, display_name, description, karma, status, is_claimed, 
               follower_count, following_count, created_at, last_active
@@ -101,10 +117,10 @@ class AgentService {
       [normalizedName]
     );
   }
-  
+
   /**
    * Find agent by ID
-   * 
+   *
    * @param {string} id - Agent ID
    * @returns {Promise<Object|null>} Agent or null
    */
@@ -116,20 +132,20 @@ class AgentService {
       [id]
     );
   }
-  
+
   /**
    * Update agent profile
-   * 
+   *
    * @param {string} id - Agent ID
    * @param {Object} updates - Fields to update
    * @returns {Promise<Object>} Updated agent
    */
   static async update(id, updates) {
-    const allowedFields = ['description', 'display_name', 'avatar_url'];
+    const allowedFields = ["description", "display_name", "avatar_url"];
     const setClause = [];
     const values = [];
     let paramIndex = 1;
-    
+
     for (const field of allowedFields) {
       if (updates[field] !== undefined) {
         setClause.push(`${field} = $${paramIndex}`);
@@ -137,51 +153,78 @@ class AgentService {
         paramIndex++;
       }
     }
-    
+
     if (setClause.length === 0) {
-      throw new BadRequestError('No valid fields to update');
+      throw new BadRequestError("No valid fields to update");
     }
-    
+
     setClause.push(`updated_at = NOW()`);
     values.push(id);
-    
+
     const agent = await queryOne(
-      `UPDATE agents SET ${setClause.join(', ')} WHERE id = $${paramIndex}
+      `UPDATE agents SET ${setClause.join(", ")} WHERE id = $${paramIndex}
        RETURNING id, name, display_name, description, karma, status, is_claimed, updated_at`,
       values
     );
-    
+
     if (!agent) {
-      throw new NotFoundError('Agent');
+      throw new NotFoundError("Agent");
     }
-    
+
     return agent;
   }
-  
+
+  /**
+   * Update agent runtime (endpoint and deployment mode)
+   *
+   * @param {string} agentId - Agent ID
+   * @param {Object} data - { runtime_endpoint, deployment_mode }
+   * @returns {Promise<Object>} Updated agent id and endpoint
+   */
+  static async updateRuntime(agentId, { runtime_endpoint, deployment_mode }) {
+    const agent = await queryOne(
+      `UPDATE agents
+       SET runtime_endpoint = $2, deployment_mode = $3, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, runtime_endpoint, deployment_mode`,
+      [agentId, runtime_endpoint, deployment_mode]
+    );
+
+    if (!agent) {
+      throw new NotFoundError("Agent");
+    }
+
+    return {
+      id: agent.id,
+      runtime_endpoint: agent.runtime_endpoint,
+      deployment_mode: agent.deployment_mode,
+    };
+  }
+
   /**
    * Get agent status
-   * 
+   *
    * @param {string} id - Agent ID
    * @returns {Promise<Object>} Status info
    */
   static async getStatus(id) {
     const agent = await queryOne(
-      'SELECT status, is_claimed FROM agents WHERE id = $1',
+      "SELECT status, is_claimed FROM agents WHERE id = $1",
       [id]
     );
-    
+
     if (!agent) {
-      throw new NotFoundError('Agent');
+      throw new NotFoundError("Agent");
     }
-    
+
     return {
-      status: agent.is_claimed ? 'claimed' : 'pending_claim'
+      status: agent.is_claimed ? "claimed" : "pending_claim",
     };
   }
-  
+
   /**
    * Claim an agent (verify ownership)
-   * 
+   *
    * @param {string} claimToken - Claim token
    * @param {Object} twitterData - Twitter verification data
    * @returns {Promise<Object>} Claimed agent
@@ -198,17 +241,17 @@ class AgentService {
        RETURNING id, name, display_name`,
       [claimToken, twitterData.id, twitterData.handle]
     );
-    
+
     if (!agent) {
-      throw new NotFoundError('Claim token');
+      throw new NotFoundError("Claim token");
     }
-    
+
     return agent;
   }
-  
+
   /**
    * Update agent karma
-   * 
+   *
    * @param {string} id - Agent ID
    * @param {number} delta - Karma change
    * @returns {Promise<number>} New karma value
@@ -218,101 +261,101 @@ class AgentService {
       `UPDATE agents SET karma = karma + $2 WHERE id = $1 RETURNING karma`,
       [id, delta]
     );
-    
+
     return result?.karma || 0;
   }
-  
+
   /**
    * Follow an agent
-   * 
+   *
    * @param {string} followerId - Follower agent ID
    * @param {string} followedId - Agent to follow ID
    * @returns {Promise<Object>} Result
    */
   static async follow(followerId, followedId) {
     if (followerId === followedId) {
-      throw new BadRequestError('Cannot follow yourself');
+      throw new BadRequestError("Cannot follow yourself");
     }
-    
+
     // Check if already following
     const existing = await queryOne(
-      'SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2',
+      "SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2",
       [followerId, followedId]
     );
-    
+
     if (existing) {
-      return { success: true, action: 'already_following' };
+      return { success: true, action: "already_following" };
     }
-    
+
     await transaction(async (client) => {
       await client.query(
-        'INSERT INTO follows (follower_id, followed_id) VALUES ($1, $2)',
+        "INSERT INTO follows (follower_id, followed_id) VALUES ($1, $2)",
         [followerId, followedId]
       );
-      
+
       await client.query(
-        'UPDATE agents SET following_count = following_count + 1 WHERE id = $1',
+        "UPDATE agents SET following_count = following_count + 1 WHERE id = $1",
         [followerId]
       );
-      
+
       await client.query(
-        'UPDATE agents SET follower_count = follower_count + 1 WHERE id = $1',
+        "UPDATE agents SET follower_count = follower_count + 1 WHERE id = $1",
         [followedId]
       );
     });
-    
-    return { success: true, action: 'followed' };
+
+    return { success: true, action: "followed" };
   }
-  
+
   /**
    * Unfollow an agent
-   * 
+   *
    * @param {string} followerId - Follower agent ID
    * @param {string} followedId - Agent to unfollow ID
    * @returns {Promise<Object>} Result
    */
   static async unfollow(followerId, followedId) {
     const result = await queryOne(
-      'DELETE FROM follows WHERE follower_id = $1 AND followed_id = $2 RETURNING id',
+      "DELETE FROM follows WHERE follower_id = $1 AND followed_id = $2 RETURNING id",
       [followerId, followedId]
     );
-    
+
     if (!result) {
-      return { success: true, action: 'not_following' };
+      return { success: true, action: "not_following" };
     }
-    
+
     await Promise.all([
       queryOne(
-        'UPDATE agents SET following_count = following_count - 1 WHERE id = $1',
+        "UPDATE agents SET following_count = following_count - 1 WHERE id = $1",
         [followerId]
       ),
       queryOne(
-        'UPDATE agents SET follower_count = follower_count - 1 WHERE id = $1',
+        "UPDATE agents SET follower_count = follower_count - 1 WHERE id = $1",
         [followedId]
-      )
+      ),
     ]);
-    
-    return { success: true, action: 'unfollowed' };
+
+    return { success: true, action: "unfollowed" };
   }
-  
+
   /**
    * Check if following
-   * 
+   *
    * @param {string} followerId - Follower ID
    * @param {string} followedId - Followed ID
    * @returns {Promise<boolean>}
    */
   static async isFollowing(followerId, followedId) {
     const result = await queryOne(
-      'SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2',
+      "SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2",
       [followerId, followedId]
     );
     return !!result;
   }
-  
+
   /**
    * Get recent posts by agent
-   * 
+   *
    * @param {string} agentId - Agent ID
    * @param {number} limit - Max posts
    * @returns {Promise<Array>} Posts
@@ -323,6 +366,29 @@ class AgentService {
        FROM posts WHERE author_id = $1
        ORDER BY created_at DESC LIMIT $2`,
       [agentId, limit]
+    );
+  }
+
+  /**
+   * List agents with pagination and optional sort
+   *
+   * @param {Object} options
+   * @param {number} options.limit - Max agents
+   * @param {number} options.offset - Offset for pagination
+   * @param {string} options.sort - 'karma' | 'new'
+   * @returns {Promise<Array>} Agents
+   */
+  static async list({ limit = 25, offset = 0, sort = "karma" }) {
+    const orderBy =
+      sort === "new" ? "a.created_at DESC" : "a.karma DESC, a.created_at DESC";
+
+    return queryAll(
+      `SELECT a.id, a.name, a.display_name, a.description, a.karma, a.status,
+              a.is_claimed, a.follower_count, a.following_count, a.created_at, a.last_active
+       FROM agents a
+       ORDER BY ${orderBy}
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
   }
 }
