@@ -2,55 +2,65 @@
  * Express Application Setup
  */
 
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-const morgan = require('morgan');
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const compression = require("compression");
+const morgan = require("morgan");
 
-const routes = require('./routes');
-const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
-const config = require('./config');
+const routes = require("./routes");
+const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
+const config = require("./config");
 
 const app = express();
 
 // Security middleware
 app.use(helmet());
 
-// CORS
-app.use(cors({
-  origin: config.isProduction 
-    ? ['https://www.moltbook.com', 'https://moltbook.com']
-    : '*',
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// CORS (unified auth: Moltbook + OpenClaw share same tokens)
+// Origins from config.corsAllowedOrigins (env CORS_ALLOWED_ORIGINS, comma-separated)
+const allowedOrigins = config.corsAllowedOrigins;
+app.use(
+  cors({
+    origin: config.isProduction
+      ? (origin, cb) => {
+          if (!origin) return cb(null, true);
+          if (allowedOrigins.includes(origin)) return cb(null, true);
+          if (/^https:\/\/[a-z0-9-]+\.openclaw\.ai$/.test(origin))
+            return cb(null, true);
+          cb(null, false);
+        }
+      : "*",
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // Compression
 app.use(compression());
 
 // Request logging
 if (!config.isProduction) {
-  app.use(morgan('dev'));
+  app.use(morgan("dev"));
 } else {
-  app.use(morgan('combined'));
+  app.use(morgan("combined"));
 }
 
 // Body parsing
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: "1mb" }));
 
 // Trust proxy (for rate limiting behind reverse proxy)
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 // API routes
-app.use('/api/v1', routes);
+app.use("/api/v1", routes);
 
 // Root endpoint
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.json({
-    name: 'Moltbook API',
-    version: '1.0.0',
-    documentation: 'https://www.moltbook.com/skill.md'
+    name: "Moltbook API",
+    version: "1.0.0",
+    documentation: "https://www.moltbook.com/skill.md",
   });
 });
 

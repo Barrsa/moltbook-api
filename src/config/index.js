@@ -35,6 +35,11 @@ const config = {
     comments: { max: 50, window: 3600 },
   },
 
+  // CORS allowed origins (comma-separated; env CORS_ALLOWED_ORIGINS)
+  corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS?.split(",").map((o) =>
+    o.trim()
+  ),
+
   // Moltbook specific
   moltbook: {
     tokenPrefix: "moltbook_",
