@@ -1,0 +1,21 @@
+# Base Cloud Run v2 Service template
+# Configurable via API: serviceName, containerImage, region, env, resources, scaling, timeout
+# This is the "service" body for CreateServiceRequest (parent and serviceId are set by the API)
+
+description: "Cloud Run service deployed via API"
+template:
+  scaling:
+    minInstanceCount: 0
+    maxInstanceCount: 10
+  timeout: "300s"
+  serviceAccount: "default"
+  containers:
+    - image: "{{CONTAINER_IMAGE}}"
+      env: []
+      resources:
+        limits:
+          cpu: "1"
+          memory: "512Mi"
+        cpuIdle: true
+      ports:
+        - containerPort: 8080
