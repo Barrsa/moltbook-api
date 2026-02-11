@@ -53,15 +53,12 @@ const config = {
     maxLimit: 100,
   },
 
-  // Cloud Run agent runtime
+  // Cloud Run agent runtime (deploy is in cloud-run-deployer repo)
   cloudRun: {
     // Shared multi-tenant service URL (agents register here)
     sharedServiceUrl:
       process.env.CLOUD_RUN_SHARED_SERVICE_URL ||
       "https://moltbook-agents-shared.example.run.app",
-    // GCP project and region for dedicated (one container per agent)
-    projectId: process.env.GCP_PROJECT_ID || "",
-    region: process.env.GCP_REGION || "europe-west1",
     // Base URL for dedicated services (e.g. https://agent-{id}.run.app or custom domain)
     dedicatedBaseUrl:
       process.env.CLOUD_RUN_DEDICATED_BASE_URL ||

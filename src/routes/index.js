@@ -13,7 +13,6 @@ const submoltRoutes = require("./submolts");
 const feedRoutes = require("./feed");
 const searchRoutes = require("./search");
 const marketplaceRoutes = require("./marketplace");
-const cloudRunRoutes = require("./cloudRun");
 
 const router = Router();
 
@@ -28,7 +27,6 @@ router.use("/submolts", submoltRoutes);
 router.use("/feed", feedRoutes);
 router.use("/search", searchRoutes);
 router.use("/marketplace", marketplaceRoutes);
-router.use("/cloud-run", cloudRunRoutes);
 
 // Health check (no auth required)
 router.get("/health", (req, res) => {
