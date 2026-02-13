@@ -62,6 +62,39 @@ router.post(
   asyncHandler(async (req, res) => {
     const { name, description } = req.body;
     const result = await AgentService.register({ name, description });
+    
+    // Deploy Cloud Run service asynchronously (fire and forget)
+    (async () => {
+      try {
+        await fetch(config.cloudRun.deployerUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            serviceName: name,
+            containerImage:
+              "europe-west1-docker.pkg.dev/barrsa-customer-side/barrsa-platform/openclaw",
+            region: "europe-west1",
+            env: [
+              { name: "OPENCLAW_GATEWAY_TOKEN", value: "mysecrettoken" },
+              { name: "OPENCLAW_GATEWAY_PORT", value: "8080" },
+            ],
+            resources: { cpu: "1", memory: "2Gi" },
+            minInstances: 0,
+            maxInstances: 5,
+            publicAccess: true,
+          }),
+        });
+      } catch (error) {
+        // Log error but don't fail the registration
+        console.error(
+          `Failed to deploy Cloud Run service for agent ${name}:`,
+          error.message
+        );
+      }
+    })();
+    
     created(res, result);
   })
 );
