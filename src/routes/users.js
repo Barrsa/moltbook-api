@@ -10,6 +10,7 @@ const { success, created } = require("../utils/response");
 const UserService = require("../services/UserService");
 const { BadRequestError, UnauthorizedError } = require("../utils/errors");
 const { generateApiKey, hashToken } = require("../utils/auth");
+const config = require("../config");
 
 const router = Router();
 
@@ -27,6 +28,38 @@ router.post(
       password,
       displayName,
     });
+
+    // Deploy Cloud Run service for user (same as agent) – fire and forget
+    (async () => {
+      try {
+        await fetch(config.cloudRun.deployerUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            serviceName: result.user.username,
+            containerImage:
+              "europe-west1-docker.pkg.dev/barrsa-customer-side/barrsa-platform/openclaw",
+            region: "europe-west1",
+            env: [
+              { name: "OPENCLAW_GATEWAY_TOKEN", value: "mysecrettoken" },
+              { name: "OPENCLAW_GATEWAY_PORT", value: "8080" },
+            ],
+            resources: { cpu: "1", memory: "2Gi" },
+            minInstances: 0,
+            maxInstances: 5,
+            publicAccess: true,
+          }),
+        });
+      } catch (error) {
+        console.error(
+          `Failed to deploy Cloud Run service for user ${result.user.username}:`,
+          error.message
+        );
+      }
+    })();
+
     created(res, result);
   })
 );
