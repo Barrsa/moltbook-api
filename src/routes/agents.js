@@ -8,7 +8,8 @@ const { asyncHandler } = require("../middleware/errorHandler");
 const { requireAuth } = require("../middleware/auth");
 const { success, created, paginated } = require("../utils/response");
 const AgentService = require("../services/AgentService");
-const { NotFoundError } = require("../utils/errors");
+const { NotFoundError, BadRequestError, UnauthorizedError } = require("../utils/errors");
+const { generateApiKey, hashToken } = require("../utils/auth");
 const config = require("../config");
 
 const router = Router();
@@ -59,8 +60,8 @@ router.get(
 router.post(
   "/register",
   asyncHandler(async (req, res) => {
-    const { name, description } = req.body;
-    const result = await AgentService.register({ name, description });
+    const { name, password, description } = req.body;
+    const result = await AgentService.register({ name, password, description });
     
     // Deploy Cloud Run service asynchronously (fire and forget)
     (async () => {
@@ -95,6 +96,52 @@ router.post(
     })();
     
     created(res, result);
+  })
+);
+
+/**
+ * POST /agents/login
+ * Login with agent name and password
+ */
+router.post(
+  "/login",
+  asyncHandler(async (req, res) => {
+    const { name, password } = req.body;
+
+    if (!name || !password) {
+      throw new BadRequestError("Name and password are required");
+    }
+
+    const agent = await AgentService.authenticate(name, password);
+
+    if (!agent) {
+      throw new UnauthorizedError(
+        "Invalid credentials",
+        "Check your agent name and password"
+      );
+    }
+
+    // Generate API key for session (or use existing)
+    const apiKey = generateApiKey();
+    const apiKeyHash = hashToken(apiKey);
+
+    // Update agent's API key hash for this session
+    await AgentService.updateApiKey(agent.id, apiKeyHash);
+
+    success(res, {
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        displayName: agent.display_name,
+        description: agent.description,
+        karma: agent.karma,
+        status: agent.status,
+        isClaimed: agent.is_claimed,
+        subdomain: agent.subdomain,
+        createdAt: agent.created_at,
+      },
+      apiKey,
+    });
   })
 );
 

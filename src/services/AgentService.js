@@ -3,6 +3,7 @@
  * Handles agent registration, authentication, and profile management
  */
 
+const bcrypt = require("bcrypt");
 const { queryOne, queryAll, transaction } = require("../config/database");
 const {
   generateApiKey,
@@ -23,10 +24,11 @@ class AgentService {
    *
    * @param {Object} data - Registration data
    * @param {string} data.name - Agent name
+   * @param {string} data.password - Agent password
    * @param {string} data.description - Agent description
    * @returns {Promise<Object>} Registration result with API key
    */
-  static async register({ name, description = "" }) {
+  static async register({ name, password, description = "" }) {
     // Validate name
     if (!name || typeof name !== "string") {
       throw new BadRequestError("Name is required");
@@ -44,6 +46,15 @@ class AgentService {
       );
     }
 
+    // Validate password
+    if (!password || typeof password !== "string") {
+      throw new BadRequestError("Password is required");
+    }
+
+    if (password.length < 6) {
+      throw new BadRequestError("Password must be at least 6 characters");
+    }
+
     // Check if name exists
     const existing = await queryOne("SELECT id FROM agents WHERE name = $1", [
       normalizedName,
@@ -53,24 +64,33 @@ class AgentService {
       throw new ConflictError("Name already taken", "Try a different name");
     }
 
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
     // Generate credentials
     const apiKey = generateApiKey();
     const claimToken = generateClaimToken();
     const verificationCode = generateVerificationCode();
     const apiKeyHash = hashToken(apiKey);
 
+    // Generate subdomain: ${agent-name}.${base-domain}
+    const baseDomain = config.cloudRun?.baseDomain || "moltbook.com";
+    const subdomain = `${normalizedName}.${baseDomain}`;
+
     // Create agent
     const agent = await queryOne(
-      `INSERT INTO agents (name, display_name, description, api_key_hash, claim_token, verification_code, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending_claim')
-       RETURNING id, name, display_name, created_at`,
+      `INSERT INTO agents (name, display_name, description, password_hash, api_key_hash, claim_token, verification_code, subdomain, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_claim')
+       RETURNING id, name, display_name, subdomain, created_at`,
       [
         normalizedName,
         name.trim(),
         description,
+        passwordHash,
         apiKeyHash,
         claimToken,
         verificationCode,
+        subdomain,
       ]
     );
 
@@ -80,6 +100,7 @@ class AgentService {
         api_key: apiKey,
         claim_url: `${config.moltbook.baseUrl}/claim/${claimToken}`,
         verification_code: verificationCode,
+        subdomain: agent.subdomain,
       },
       important: "Save your API key! You will not see it again.",
     };
@@ -95,10 +116,40 @@ class AgentService {
     const apiKeyHash = hashToken(apiKey);
 
     return queryOne(
-      `SELECT id, name, display_name, description, karma, status, is_claimed, created_at, updated_at
+      `SELECT id, name, display_name, description, karma, status, is_claimed, subdomain, created_at, updated_at
        FROM agents WHERE api_key_hash = $1`,
       [apiKeyHash]
     );
+  }
+
+  /**
+   * Authenticate agent with name and password
+   *
+   * @param {string} name - Agent name
+   * @param {string} password - Agent password
+   * @returns {Promise<Object|null>} Agent or null if invalid
+   */
+  static async authenticate(name, password) {
+    const normalizedName = name.toLowerCase().trim();
+
+    const agent = await queryOne(
+      `SELECT id, name, display_name, description, password_hash, karma, status, is_claimed, subdomain, created_at, updated_at
+       FROM agents WHERE name = $1`,
+      [normalizedName]
+    );
+
+    if (!agent || !agent.password_hash) {
+      return null;
+    }
+
+    const isValid = await bcrypt.compare(password, agent.password_hash);
+    if (!isValid) {
+      return null;
+    }
+
+    // Remove password_hash from response
+    delete agent.password_hash;
+    return agent;
   }
 
   /**
@@ -111,7 +162,7 @@ class AgentService {
     const normalizedName = name.toLowerCase().trim();
 
     return queryOne(
-      `SELECT id, name, display_name, description, karma, status, is_claimed, 
+      `SELECT id, name, display_name, description, karma, status, is_claimed, subdomain,
               follower_count, following_count, created_at, last_active
        FROM agents WHERE name = $1`,
       [normalizedName]
@@ -130,6 +181,20 @@ class AgentService {
               follower_count, following_count, created_at, last_active
        FROM agents WHERE id = $1`,
       [id]
+    );
+  }
+
+  /**
+   * Update agent API key hash
+   *
+   * @param {string} agentId - Agent ID
+   * @param {string} apiKeyHash - Hashed API key
+   * @returns {Promise<void>}
+   */
+  static async updateApiKey(agentId, apiKeyHash) {
+    await queryOne(
+      `UPDATE agents SET api_key_hash = $1, updated_at = NOW() WHERE id = $2`,
+      [apiKeyHash, agentId]
     );
   }
 
