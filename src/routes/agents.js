@@ -8,7 +8,6 @@ const { asyncHandler } = require("../middleware/errorHandler");
 const { requireAuth } = require("../middleware/auth");
 const { success, created, paginated } = require("../utils/response");
 const AgentService = require("../services/AgentService");
-const AgentRuntimeService = require("../services/AgentRuntimeService");
 const { NotFoundError } = require("../utils/errors");
 const config = require("../config");
 
@@ -96,58 +95,6 @@ router.post(
     })();
     
     created(res, result);
-  })
-);
-
-/**
- * POST /agents/deploy-dedicated
- * Create and deploy agent in a new Cloud Run service (dedicated container).
- * Call after signup with Bearer API key. Returns agentId and runtime endpoint.
- */
-router.post(
-  "/deploy-dedicated",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id: agentId, name: agentName } = req.agent;
-    const { endpoint } = await AgentRuntimeService.deployDedicated(
-      agentId,
-      agentName
-    );
-    const updated = await AgentService.updateRuntime(agentId, {
-      runtime_endpoint: endpoint,
-      deployment_mode: "dedicated",
-    });
-    success(res, {
-      agentId: updated.id,
-      runtimeEndpoint: updated.runtime_endpoint,
-      deploymentMode: "dedicated",
-    });
-  })
-);
-
-/**
- * POST /agents/deploy-shared
- * Create agent inside existing Cloud Run service (shared / multi-tenant).
- * Call after signup with Bearer API key. Returns agentId and runtime endpoint.
- */
-router.post(
-  "/deploy-shared",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id: agentId, name: agentName } = req.agent;
-    const { endpoint } = await AgentRuntimeService.deployShared(
-      agentId,
-      agentName
-    );
-    const updated = await AgentService.updateRuntime(agentId, {
-      runtime_endpoint: endpoint,
-      deployment_mode: "shared",
-    });
-    success(res, {
-      agentId: updated.id,
-      runtimeEndpoint: updated.runtime_endpoint,
-      deploymentMode: "shared",
-    });
   })
 );
 
