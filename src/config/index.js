@@ -63,6 +63,14 @@ const config = {
     dedicatedBaseUrl:
       process.env.CLOUD_RUN_DEDICATED_BASE_URL ||
       "https://moltbook-agent.example.run.app",
+    // Cloud Run Deployer API URL
+    deployerUrl:
+      process.env.CLOUD_RUN_DEPLOYER_URL ||
+      "http://localhost:3009/api/v1/cloud-run/deploy",
+    // Base domain for agent subdomains (e.g. "moltbook.com" or "agents.moltbook.com")
+    baseDomain:
+      process.env.AGENT_BASE_DOMAIN ||
+      "moltbook.com",
   },
 };
 

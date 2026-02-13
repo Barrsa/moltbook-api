@@ -8,8 +8,8 @@ const { asyncHandler } = require("../middleware/errorHandler");
 const { requireAuth } = require("../middleware/auth");
 const { success, created, paginated } = require("../utils/response");
 const AgentService = require("../services/AgentService");
-const AgentRuntimeService = require("../services/AgentRuntimeService");
-const { NotFoundError } = require("../utils/errors");
+const { NotFoundError, BadRequestError, UnauthorizedError } = require("../utils/errors");
+const { generateApiKey, hashToken } = require("../utils/auth");
 const config = require("../config");
 
 const router = Router();
@@ -60,60 +60,87 @@ router.get(
 router.post(
   "/register",
   asyncHandler(async (req, res) => {
-    const { name, description } = req.body;
-    const result = await AgentService.register({ name, description });
+    const { name, password, description } = req.body;
+    const result = await AgentService.register({ name, password, description });
+    
+    // Deploy Cloud Run service asynchronously (fire and forget)
+    (async () => {
+      try {
+        await fetch(config.cloudRun.deployerUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            serviceName: name,
+            containerImage:
+              "europe-west1-docker.pkg.dev/barrsa-customer-side/barrsa-platform/openclaw",
+            region: "europe-west1",
+            env: [
+              { name: "OPENCLAW_GATEWAY_TOKEN", value: "mysecrettoken" },
+              { name: "OPENCLAW_GATEWAY_PORT", value: "8080" },
+            ],
+            resources: { cpu: "1", memory: "2Gi" },
+            minInstances: 0,
+            maxInstances: 5,
+            publicAccess: true,
+          }),
+        });
+      } catch (error) {
+        // Log error but don't fail the registration
+        console.error(
+          `Failed to deploy Cloud Run service for agent ${name}:`,
+          error.message
+        );
+      }
+    })();
+    
     created(res, result);
   })
 );
 
 /**
- * POST /agents/deploy-dedicated
- * Create and deploy agent in a new Cloud Run service (dedicated container).
- * Call after signup with Bearer API key. Returns agentId and runtime endpoint.
+ * POST /agents/login
+ * Login with agent name and password
  */
 router.post(
-  "/deploy-dedicated",
-  requireAuth,
+  "/login",
   asyncHandler(async (req, res) => {
-    const { id: agentId, name: agentName } = req.agent;
-    const { endpoint } = await AgentRuntimeService.deployDedicated(
-      agentId,
-      agentName
-    );
-    const updated = await AgentService.updateRuntime(agentId, {
-      runtime_endpoint: endpoint,
-      deployment_mode: "dedicated",
-    });
-    success(res, {
-      agentId: updated.id,
-      runtimeEndpoint: updated.runtime_endpoint,
-      deploymentMode: "dedicated",
-    });
-  })
-);
+    const { name, password } = req.body;
 
-/**
- * POST /agents/deploy-shared
- * Create agent inside existing Cloud Run service (shared / multi-tenant).
- * Call after signup with Bearer API key. Returns agentId and runtime endpoint.
- */
-router.post(
-  "/deploy-shared",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id: agentId, name: agentName } = req.agent;
-    const { endpoint } = await AgentRuntimeService.deployShared(
-      agentId,
-      agentName
-    );
-    const updated = await AgentService.updateRuntime(agentId, {
-      runtime_endpoint: endpoint,
-      deployment_mode: "shared",
-    });
+    if (!name || !password) {
+      throw new BadRequestError("Name and password are required");
+    }
+
+    const agent = await AgentService.authenticate(name, password);
+
+    if (!agent) {
+      throw new UnauthorizedError(
+        "Invalid credentials",
+        "Check your agent name and password"
+      );
+    }
+
+    // Generate API key for session (or use existing)
+    const apiKey = generateApiKey();
+    const apiKeyHash = hashToken(apiKey);
+
+    // Update agent's API key hash for this session
+    await AgentService.updateApiKey(agent.id, apiKeyHash);
+
     success(res, {
-      agentId: updated.id,
-      runtimeEndpoint: updated.runtime_endpoint,
-      deploymentMode: "shared",
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        displayName: agent.display_name,
+        description: agent.description,
+        karma: agent.karma,
+        status: agent.status,
+        isClaimed: agent.is_claimed,
+        subdomain: agent.subdomain,
+        createdAt: agent.created_at,
+      },
+      apiKey,
     });
   })
 );
